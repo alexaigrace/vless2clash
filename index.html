@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="在浏览器本地解析节点链接，生成 Mihomo 配置，并按需托管订阅。"
+    />
+    <title>折流 · 节点配置工作台</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到工作区</a>
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="折流首页">
+        <span>折流</span>
+        <span class="wordmark__sub">vless2clash</span>
+      </a>
+      <p class="topbar__note">浏览器本地转换</p>
+    </header>
+
+    <main id="main" class="workspace">
+      <section class="workspace-head" aria-labelledby="page-title">
+        <div>
+          <h1 id="page-title">节点转Clash订阅处理器</h1>
+          <p class="lede">
+            粘贴链接，在本地检查并预览 Mihomo 配置；发布前不会上传原始链接。
+          </p>
+        </div>
+        <p class="compatibility">
+          面向 Mihomo 与 Clash Verge Rev
+          <span>注意：传统 Clash 不支持 VLESS / Reality</span>
+        </p>
+      </section>
+
+      <noscript>
+        <p class="noscript-note">
+          这个工作台需要启用 JavaScript 才能解析节点和生成配置。启用后，原始链接只在浏览器内处理；发布 YAML 需要你主动操作。
+        </p>
+      </noscript>
+
+      <div class="workbench">
+        <section class="source-panel" aria-labelledby="source-title">
+          <div class="panel-heading">
+            <div>
+              <h2 id="source-title">节点来源</h2>
+              <p>每行粘贴一条 vless、vmess、trojan 或 ss 链接。</p>
+            </div>
+            <span class="privacy-mark">本地处理</span>
+          </div>
+
+          <label class="field-label" for="links-input">节点链接</label>
+          <textarea
+            id="links-input"
+            name="links"
+            class="links-input"
+            spellcheck="false"
+            autocomplete="off"
+            autocapitalize="off"
+            aria-describedby="input-help"
+            placeholder="vless://…&#10;vmess://…&#10;trojan://…"
+          ></textarea>
+          <div class="input-tools">
+            <p id="input-help" class="helper-text">
+              链接含有身份凭据，请只粘贴你信任的节点信息。
+            </p>
+            <div class="text-actions">
+              <button class="text-button" id="sample-button" type="button">
+                载入示例
+              </button>
+              <button class="text-button" id="clear-button" type="button">
+                清空
+              </button>
+            </div>
+          </div>
+
+          <label class="field-label name-label" for="subscription-name">
+            配置名称
+          </label>
+          <input
+            id="subscription-name"
+            name="subscriptionName"
+            class="name-input"
+            type="text"
+            maxlength="64"
+            value="我的节点"
+            autocomplete="off"
+          />
+
+          <fieldset class="routing">
+            <legend>智能路由</legend>
+            <label class="switch-row" for="direct-china">
+              <span class="switch-copy">
+                <span class="switch-title">中国内地直连</span>
+                <span class="switch-detail">本机网络与中国流量优先直连，其余走代理</span>
+              </span>
+              <input id="direct-china" type="checkbox" checked />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <label class="switch-row" for="block-ads">
+              <span class="switch-copy">
+                <span class="switch-title">拦截广告请求</span>
+                <span class="switch-detail">由客户端规则集判断，覆盖范围会随规则变化</span>
+              </span>
+              <input id="block-ads" type="checkbox" checked />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <div class="route-summary" aria-label="路由方案">
+              <span>
+                <b id="route-china-action" class="route-key route-key--direct">直连</b>
+                <span>中国内地</span>
+              </span>
+              <span><b class="route-key route-key--proxy">代理</b><span>其他流量</span></span>
+              <span>
+                <b id="route-ads-action" class="route-key route-key--block">拦截</b>
+                <span id="route-ads-target">广告请求</span>
+              </span>
+            </div>
+          </fieldset>
+
+          <div class="generate-row">
+            <button id="generate-button" class="button button--primary" type="button">
+              生成预览
+            </button>
+            <p class="generate-note">检查通过后，可发布有效节点。</p>
+          </div>
+        </section>
+
+        <section class="result-panel" aria-labelledby="result-title">
+          <div class="panel-heading result-heading">
+            <div>
+              <h2 id="result-title">配置预览</h2>
+              <p id="result-summary">生成后查看节点与完整 YAML。</p>
+            </div>
+            <span id="preview-state" class="state-label" role="status">尚未生成</span>
+          </div>
+
+          <div id="parse-errors" class="parse-errors" aria-live="polite" hidden></div>
+
+          <div class="preview-tabs" role="tablist" aria-label="预览内容">
+            <button
+              id="nodes-tab"
+              class="preview-tab is-current"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="nodes-view"
+              tabindex="0"
+            >
+              节点 <span id="node-count" class="count-badge">0</span>
+            </button>
+            <button
+              id="yaml-tab"
+              class="preview-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="yaml-view"
+              tabindex="-1"
+            >
+              YAML
+            </button>
+          </div>
+
+          <div
+            id="nodes-view"
+            class="preview-body node-list"
+            role="tabpanel"
+            aria-labelledby="nodes-tab"
+            tabindex="0"
+          >
+            <div id="empty-state" class="empty-state">
+              <p class="empty-title">配置会出现在这里</p>
+              <p>粘贴节点链接，再生成一次预览。</p>
+            </div>
+            <ul id="nodes-list" class="nodes-list" aria-label="解析成功的节点" hidden></ul>
+          </div>
+
+          <div
+            id="yaml-view"
+            class="preview-body yaml-view"
+            role="tabpanel"
+            aria-labelledby="yaml-tab"
+            tabindex="0"
+            hidden
+          >
+            <pre id="yaml-content" class="yaml-content"><code>等待生成配置…</code></pre>
+          </div>
+
+          <div class="export-actions">
+            <button id="copy-yaml-button" class="button button--quiet" type="button" disabled>
+              复制 YAML
+            </button>
+            <button id="download-yaml-button" class="button button--quiet" type="button" disabled>
+              下载 YAML
+            </button>
+          </div>
+          <p id="action-status" class="action-status" role="status" aria-live="polite"></p>
+
+          <div class="publish-block">
+            <div class="publish-copy">
+              <h3>托管为订阅</h3>
+              <p id="publish-data-notice">只上传生成后的 YAML（含节点凭据），本机模式保存在这台电脑上。</p>
+            </div>
+            <button
+              id="publish-button"
+              class="button button--primary"
+              type="button"
+              disabled
+            >
+              发布订阅
+            </button>
+          </div>
+          <div class="hosting-notice" id="hosting-notice" hidden>
+            <p id="hosting-notice-text"></p>
+            <button id="retry-read-button" class="text-button" type="button" hidden>
+              重试地址确认
+            </button>
+          </div>
+
+          <section id="subscription-result" class="subscription-result" aria-labelledby="subscription-title" hidden>
+            <div class="subscription-topline">
+              <h3 id="subscription-title">订阅已创建</h3>
+              <button
+                id="subscription-confirmation"
+                class="confirmation-label"
+                type="button"
+                aria-label="重试确认订阅地址可读取"
+              >等待确认</button>
+            </div>
+            <p class="subscription-url-label">订阅地址</p>
+            <div class="copy-field">
+              <input id="subscription-url" type="text" readonly aria-label="订阅地址" />
+              <button id="copy-url-button" class="button button--quiet" type="button">
+                复制地址
+              </button>
+            </div>
+            <p id="subscription-scope" class="hosting-scope"></p>
+
+            <details class="management-details" open>
+              <summary>保存管理凭据</summary>
+              <p class="management-warning">
+                管理令牌只显示在这里，不会放进订阅地址。保存凭据文件后才能日后更新或删除。
+              </p>
+              <label class="subscription-url-label" for="manage-token">管理令牌</label>
+              <div class="copy-field">
+                <input id="manage-token" type="password" readonly aria-label="管理令牌" />
+                <button id="reveal-token-button" class="button button--quiet" type="button">
+                  显示
+                </button>
+              </div>
+              <button id="download-credentials-button" class="text-button credentials-download" type="button">
+                下载管理凭据
+              </button>
+              <div class="managed-actions">
+                <button id="update-button" class="button button--quiet" type="button" disabled>
+                  用当前配置更新
+                </button>
+                <button id="show-delete-button" class="text-button text-button--danger" type="button">
+                  删除订阅
+                </button>
+              </div>
+              <div id="delete-confirmation" class="delete-confirmation" hidden>
+                <label class="field-label" for="delete-confirmation-input">
+                  输入“删除订阅”以确认此操作
+                </label>
+                <div class="copy-field">
+                  <input id="delete-confirmation-input" class="name-input" type="text" autocomplete="off" />
+                  <button id="confirm-delete-button" class="button button--quiet button--danger" type="button" disabled>
+                    确认删除
+                  </button>
+                </div>
+                <p>撤销可能需要时间传播，也不会清除客户端已下载的配置或使节点凭据失效。</p>
+              </div>
+            </details>
+          </section>
+        </section>
+      </div>
+
+      <details class="restore-panel">
+        <summary>已有管理凭据？恢复管理入口</summary>
+        <p>输入保存的订阅 ID 和管理令牌。它们只在本次页面打开期间保留。</p>
+        <div class="restore-fields">
+          <label>
+            <span class="field-label">订阅 ID</span>
+            <input id="restore-id" class="name-input" type="text" autocomplete="off" />
+          </label>
+          <label>
+            <span class="field-label">管理令牌</span>
+            <input id="restore-token" class="name-input" type="password" autocomplete="off" />
+          </label>
+          <button id="restore-button" class="button button--quiet" type="button">恢复</button>
+        </div>
+        <p id="restore-status" class="action-status" role="status" aria-live="polite"></p>
+      </details>
+
+      <p class="footnote">
+        本地转换，主动发布后托管配置。客户端拉取订阅与规则集更新由客户端设置决定。
+      </p>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.cache/
+artifacts/
+.local-data/
+.dev-server.log
+*.log
+.DS_Store
+.npmrc
+.env
+.env.*
+!.env.example
+.wrangler/
+# 本地部署配置（含账号与 KV ID），模板见 wrangler.example.jsonc
+wrangler.jsonc
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+# 内部交接与设计文档
+handoff.md
+DESIGN-PROPOSAL.md
+docs/

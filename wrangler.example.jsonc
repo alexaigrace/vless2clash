@@ -1,0 +1,33 @@
+{
+  // Cloudflare Worker 部署配置模板。
+  // 复制为 wrangler.jsonc 后，替换 account_id 与 KV namespace id 再部署。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vless2clash",
+  // 可改为你的 Cloudflare 账号 ID，或删除本字段以使用当前 wrangler login 的账号。
+  "account_id": "<YOUR_CLOUDFLARE_ACCOUNT_ID>",
+  "main": "server/worker.mjs",
+  "compatibility_date": "2026-10-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+  "observability": {
+    "enabled": false,
+    "logs": {
+      "enabled": false
+    }
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/sub/*"]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SUBSCRIPTIONS",
+      // 运行 `npx wrangler kv namespace create vless2clash-subscriptions` 后填入返回的 id。
+      "id": "<YOUR_KV_NAMESPACE_ID>"
+    }
+  ]
+}

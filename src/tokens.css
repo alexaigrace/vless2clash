@@ -1,0 +1,54 @@
+:root {
+  color-scheme: light;
+  --color-canvas: #F6F4EF;
+  --color-paper: #FFFEFB;
+  --color-paper-soft: #F0EEE8;
+  --color-paper-inset: #F8F7F2;
+  --color-ink: #202923;
+  --color-ink-soft: #59635B;
+  --color-ink-faint: #747C74;
+  --color-action: #244D3D;
+  --color-action-hover: #193C2F;
+  --color-action-ink: #FFFEFB;
+  --color-rule: #DEDCD4;
+  --color-rule-strong: #AAA99F;
+  --color-focus: #376F53;
+  --color-error: #9E4939;
+  --color-error-soft: #F6E9E4;
+  --color-success: #315D47;
+  --color-success-soft: #E8EFE8;
+  --color-terracotta: #B66E4C;
+  --color-terracotta-soft: #F3EAE4;
+
+  --font-body: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-display: "Songti SC", "STSong", "Noto Serif CJK SC", Georgia, serif;
+  --font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.875rem;
+
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 40px;
+  --space-2xl: 64px;
+  --space-3xl: 96px;
+
+  --radius-input: 7px;
+  --radius-control: 6px;
+  --radius-panel: 12px;
+  --radius-well: 8px;
+  --shadow-panel: 0 8px 24px -18px rgba(32, 41, 35, 0.24);
+  --shadow-switch: 0 1px 3px rgba(32, 41, 35, 0.2);
+  --content-width: 1400px;
+  --dur-micro: 100ms;
+  --dur-short: 160ms;
+  --ease-out: cubic-bezier(0.2, 0.75, 0.25, 1);
+}

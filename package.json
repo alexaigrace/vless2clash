@@ -1,0 +1,27 @@
+{
+  "name": "vless2clash",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "dev:server": "node server/local.mjs",
+    "dev:worker": "npm run build && wrangler dev --local --ip 127.0.0.1",
+    "wrangler:version": "wrangler --version",
+    "wrangler:login": "wrangler login",
+    "wrangler:whoami": "wrangler whoami",
+    "build": "vite build",
+    "deploy:dry-run": "npm run build && wrangler deploy --dry-run",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1",
+    "vite": "^7.1.12",
+    "wrangler": "^4.45.0"
+  }
+}
