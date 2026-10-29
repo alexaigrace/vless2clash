@@ -2,7 +2,7 @@
 
 在浏览器中把 VLESS、VMess、Trojan、Shadowsocks 节点链接转换为 Mihomo（Clash Meta）配置。粘贴链接即可在本地解析、检查并预览 YAML，也可以把生成的配置发布为 HTTPS 订阅地址，供客户端直接拉取。
 
-在线测试：<https://v2c.alexcheungxian.top/>（可供测试）
+在线测试：<https://v2c.acheungxian.top/>（可供测试）
 
 > 面向 Mihomo 及 Clash Verge Rev 等基于 Mihomo 内核的客户端。传统 Clash 内核不支持 VLESS / Reality，无法保证兼容。
 
