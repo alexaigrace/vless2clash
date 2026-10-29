@@ -113,7 +113,52 @@ test("creates a subscription, returns a read URL, and stores only the management
   assert.equal(fetched.status, 200);
   assert.equal(fetched.headers.get("cache-control"), "no-store");
   assert.equal(fetched.headers.get("content-type"), "application/yaml; charset=utf-8");
+  assert.equal(fetched.headers.get("content-disposition"), "inline; filename=\"Travel\"; filename*=UTF-8''Travel");
   assert.equal(await fetched.text(), yaml);
+});
+
+test("uses UTF-8 names and safe filename fallbacks for subscription downloads", async () => {
+  const { handle } = createHarness();
+  const unicode = await createSubscription(handle, { name: "中文😀", yaml });
+  const unicodeResponse = await handle(new Request(unicode.url));
+  assert.equal(unicodeResponse.headers.get("content-disposition"),
+    "inline; filename=\"subscription\"; filename*=UTF-8''%E4%B8%AD%E6%96%87%F0%9F%98%80");
+
+  const special = await createSubscription(handle, { name: 'A/B\\C "VIP"; O\'\'Reilly', yaml });
+  const specialResponse = await handle(new Request(special.url));
+  assert.equal(specialResponse.headers.get("content-disposition"),
+    "inline; filename=\"A_B_C _VIP__ O__Reilly\"; filename*=UTF-8''A_B_C%20_VIP_%3B%20O__Reilly");
+  assert.equal(specialResponse.headers.get("cache-control"), "no-store");
+});
+
+test("replaces bidirectional controls in download names while keeping Chinese and emoji", async () => {
+  const { handle } = createHarness();
+  const controls = "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069";
+  const created = await createSubscription(handle, { name: `中文😀A${controls}VIP`, yaml });
+  const fetched = await handle(new Request(created.url));
+  const underscores = "_".repeat([...controls].length);
+  assert.equal(fetched.headers.get("content-disposition"),
+    `inline; filename="A${underscores}VIP"; filename*=UTF-8''%E4%B8%AD%E6%96%87%F0%9F%98%80A${underscores}VIP`);
+});
+
+test("falls back for legacy records without a name and sanitizes stored control characters", async () => {
+  const { handle, kv } = createHarness();
+  const created = await createSubscription(handle);
+  const recordKey = `subscription:${created.id}`;
+  const legacyRecord = JSON.parse(kv.values.get(recordKey));
+  delete legacyRecord.name;
+  kv.values.set(recordKey, JSON.stringify(legacyRecord));
+  const legacy = await handle(new Request(created.url));
+  assert.equal(legacy.headers.get("content-disposition"), 'inline; filename="subscription.yaml"');
+
+  legacyRecord.name = 'bad\r\nInjected: yes/../../secret"';
+  kv.values.set(recordKey, JSON.stringify(legacyRecord));
+  const malicious = await handle(new Request(created.url));
+  const disposition = malicious.headers.get("content-disposition");
+  assert.ok(disposition);
+  assert.doesNotMatch(disposition, /[\r\n\\/]/u);
+  assert.equal(disposition,
+    "inline; filename=\"bad__Injected_ yes_.._.._secret_\"; filename*=UTF-8''bad__Injected_%20yes_.._.._secret_");
 });
 
 test("rejects cross-origin create, update, and delete requests", async () => {
@@ -170,6 +215,8 @@ test("management token updates the existing read URL and deletes the subscriptio
   });
 
   const fetched = await handle(new Request(created.url));
+  assert.equal(fetched.headers.get("content-disposition"), "inline; filename=\"New name\"; filename*=UTF-8''New%20name");
+  assert.equal(fetched.headers.get("cache-control"), "no-store");
   assert.equal(await fetched.text(), changedYaml);
   const deleted = await handle(new Request(`${origin}/api/subscriptions/${created.id}`, {
     method: "DELETE",

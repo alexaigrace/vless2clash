@@ -5,6 +5,7 @@ import { SAMPLE_LINKS, buildConfig, parseLinks } from '../src/lib/engine.js';
 
 const UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const UUID2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const NON_RFC_VARIANT_UUID = 'cccccccc-cccc-4ccc-eccc-cccccccccccc';
 const b64 = (value) => Buffer.from(value, 'utf8').toString('base64');
 const vmess = (overrides = {}) => `vmess://${b64(JSON.stringify({
   v: '2',
@@ -43,6 +44,42 @@ test('maps VLESS Reality, WS, gRPC, TLS, and flow fields without dropping them',
   });
   assert.equal(nodes[1]['skip-cert-verify'], true);
   assert.deepEqual(nodes[2]['grpc-opts'], { 'grpc-service-name': 'edge/api' });
+});
+
+test('accepts Reality spx while preserving strict VLESS parameter checks', () => {
+  const { nodes, errors } = parseLinks([
+    `vless://${UUID}@one.example.com:443?security=reality&pbk=public-key&spx=%2F#one`,
+    `vless://${UUID}@two.example.com:443?security=reality&pbk=public-key&spx=%2Fcrawl%3Fpage%3D1#two`,
+    `vless://${UUID}@bad.example.com:443?security=reality&pbk=public-key&unknown=value`,
+    `vless://${UUID}@bad.example.com:443?security=tls&spx=%2F`,
+    `vless://${UUID}@bad.example.com:443?security=reality&pbk=public-key&spx=%2F&spx=%2Fother`,
+  ].join('\n'));
+  assert.equal(nodes.length, 2);
+  assert.deepEqual(errors.map(({ line }) => line), [3, 4, 5]);
+  assert.match(errors[0].message, /不支持的参数/);
+  assert.match(errors[1].message, /spx.*security=reality/);
+  assert.match(errors[2].message, /参数重复/);
+  assert.ok(nodes.every((node) => !('spider-x' in node['reality-opts'])));
+  const { config } = buildConfig(nodes);
+  assert.ok(config.proxies.every((node) => !('spider-x' in node['reality-opts'])));
+});
+
+test('accepts non-RFC UUID variant in VLESS and VMess without accepting malformed IDs', () => {
+  const { nodes, errors } = parseLinks([
+    `vless://${NON_RFC_VARIANT_UUID}@vless.example.com:443?security=reality&pbk=public-key#vless`,
+    vmess({ id: NON_RFC_VARIANT_UUID }),
+    `vless://cccccccc-cccc-4ccc-eccc-ccccccccccc@bad.example.com:443`,
+    vmess({ id: 'cccccccc-cccc-4ccc-xccc-cccccccccccc' }),
+    `vless://cccccccc-cccc-0ccc-eccc-cccccccccccc@bad.example.com:443`,
+  ].join('\n'));
+  assert.deepEqual(nodes.map(({ type, uuid }) => [type, uuid]), [
+    ['vless', NON_RFC_VARIANT_UUID],
+    ['vmess', NON_RFC_VARIANT_UUID],
+  ]);
+  assert.deepEqual(errors.map(({ line }) => line), [3, 4, 5]);
+  assert.ok(errors.every(({ message }) => /UUID 无效/.test(message)));
+  const { config, yaml } = buildConfig(nodes);
+  assert.deepEqual(parseYaml(yaml).proxies.map(({ uuid }) => uuid), config.proxies.map(({ uuid }) => uuid));
 });
 
 test('parses VMess WS and gRPC transports and TLS fingerprints', () => {
@@ -127,17 +164,23 @@ test('enforces strict UUID, port, base64, and unsupported-field validation', () 
 });
 
 test('deduplicates names and keeps reserved strategy names usable', () => {
-  const { nodes, errors } = parseLinks([
-    `trojan://one@a.example.com:443#PROXY`,
-    `trojan://two@b.example.com:443#PROXY`,
-    `trojan://three@c.example.com:443#DIRECT`,
-    `trojan://four@d.example.com:443#same`,
-    `trojan://five@e.example.com:443#same`,
-  ].join('\n'));
+  const names = [
+    'GLOBAL', 'PROXY', 'DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE',
+    '直连', '广告拦截', 'PROXY', 'pass', 'same', 'same',
+  ];
+  const { nodes, errors } = parseLinks(names.map((name, index) =>
+    `trojan://synthetic@node${index}.example.com:443#${encodeURIComponent(name)}`
+  ).join('\n'));
   assert.deepEqual(errors, []);
   assert.deepEqual(nodes.map((node) => node.name), [
-    'PROXY (2)', 'PROXY (3)', 'DIRECT (2)', 'same', 'same (2)',
+    'GLOBAL (2)', 'PROXY (2)', 'DIRECT (2)', 'REJECT (2)', 'REJECT-DROP (2)',
+    'COMPATIBLE (2)', 'PASS (2)', 'PASS-RULE (2)', '直连 (2)',
+    '广告拦截 (2)', 'PROXY (3)', 'pass (3)', 'same', 'same (2)',
   ]);
+  const { config } = buildConfig(nodes);
+  const groupNames = new Set(config['proxy-groups'].map(({ name }) => name));
+  assert.ok(config.proxies.every(({ name }) => !groupNames.has(name)));
+  assert.deepEqual(config['proxy-groups'][0].proxies.slice(0, nodes.length), nodes.map(({ name }) => name));
 });
 
 test('ignores blank lines and rejects empty or oversized input safely', () => {
@@ -157,9 +200,14 @@ test('emits YAML safely, preserves proxy references, and puts rules in priority 
   assert.ok(yaml.startsWith(`# subscription-name: ${JSON.stringify('subscription: "safe"')}\n`));
   assert.deepEqual(parsed, config);
   assert.equal(parsed.proxies[0].name, label);
-  assert.deepEqual(parsed['proxy-groups'][0].proxies, [label]);
+  assert.deepEqual(parsed['proxy-groups'][0].proxies, [label, 'DIRECT']);
+  assert.deepEqual(parsed['proxy-groups'], [
+    { name: 'PROXY', type: 'select', proxies: [label, 'DIRECT'] },
+    { name: '直连', type: 'select', proxies: ['DIRECT', 'PROXY', label] },
+    { name: '广告拦截', type: 'select', proxies: ['REJECT', 'DIRECT', 'PROXY'] },
+  ]);
   assert.deepEqual(parsed.rules, [
-    'RULE-SET,ads,REJECT',
+    'RULE-SET,ads,广告拦截',
     'RULE-SET,private,DIRECT',
     'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
     'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve',
@@ -170,9 +218,14 @@ test('emits YAML safely, preserves proxy references, and puts rules in priority 
     'IP-CIDR6,::1/128,DIRECT,no-resolve',
     'IP-CIDR6,fc00::/7,DIRECT,no-resolve',
     'IP-CIDR6,fe80::/10,DIRECT,no-resolve',
-    'RULE-SET,cn,DIRECT',
-    'RULE-SET,cn_ip,DIRECT',
+    'RULE-SET,cn,直连',
+    'RULE-SET,cn_ip,直连',
     'MATCH,PROXY',
+  ]);
+  assert.ok(Object.values(parsed['rule-providers']).every((provider) => provider.proxy === 'PROXY'));
+  assert.deepEqual(parsed.dns.nameserver, [
+    'https://1.1.1.1/dns-query#PROXY',
+    'https://8.8.8.8/dns-query#PROXY',
   ]);
   assert.equal(parsed['mixed-port'], 7890);
   assert.equal(parsed['allow-lan'], false);
@@ -186,6 +239,7 @@ test('disables only optional advertisement and China routing rules', () => {
   assert.equal(config['rule-providers'].cn, undefined);
   assert.equal(config['rule-providers'].cn_ip, undefined);
   assert.equal(config.dns['nameserver-policy'], undefined);
+  assert.deepEqual(config['proxy-groups'].map(({ name }) => name), ['PROXY']);
   assert.deepEqual(config.rules, [
     'RULE-SET,private,DIRECT',
     'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
@@ -217,6 +271,19 @@ test('keeps all provider, rule, and DNS references aligned across toggle combina
       assert.equal(providerNames.includes('cn_ip'), directChina);
       assert.equal(ruleSets.includes('cn'), directChina);
       assert.equal(ruleSets.includes('cn_ip'), directChina);
+      assert.deepEqual(
+        config['proxy-groups'].map(({ name }) => name),
+        ['PROXY', ...(directChina ? ['直连'] : []), ...(blockAds ? ['广告拦截'] : [])],
+      );
+      assert.ok(config.rules.filter((rule) => rule.includes(',private,') || rule.startsWith('IP-CIDR'))
+        .every((rule) => rule.includes(',DIRECT')));
+      assert.ok(config.rules.every((rule) => {
+        const parts = rule.split(',');
+        const target = parts.at(-1) === 'no-resolve' ? parts.at(-2) : parts.at(-1);
+        return target === 'DIRECT' || config['proxy-groups'].some(({ name }) => name === target);
+      }));
+      assert.ok(Object.values(config['rule-providers']).every((provider) => provider.proxy === 'PROXY'));
+      assert.ok(config.dns.nameserver.every((server) => server.endsWith('#PROXY')));
       assert.equal(
         Object.hasOwn(config.dns['nameserver-policy'] || {}, 'rule-set:cn'),
         directChina,
@@ -230,7 +297,14 @@ test('keeps all provider, rule, and DNS references aligned across toggle combina
 });
 
 test('refuses invalid node lists instead of generating broken references', () => {
-  assert.throws(() => buildConfig([{ type: 'ss', name: 'DIRECT' }]), /名称必须唯一/);
+  for (const name of [
+    'GLOBAL', 'PROXY', 'DIRECT', 'REJECT', 'REJECT-DROP', 'COMPATIBLE', 'PASS', 'PASS-RULE',
+    '直连', '广告拦截', 'pass-rule',
+  ]) {
+    assert.throws(() => buildConfig([{ type: 'ss', name }], {
+      blockAds: false, directChina: false,
+    }), /名称必须唯一/, name);
+  }
   assert.throws(() => buildConfig([{ type: 'vmess', name: 'dup' }, { type: 'vless', name: 'DUP' }]), /名称必须唯一/);
   assert.throws(() => buildConfig([{ type: 'unknown', name: 'node' }]), /节点类型无效/);
 });

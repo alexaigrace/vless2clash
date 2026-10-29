@@ -116,6 +116,7 @@ function makeRuntimeConfig(config, { controllerPort, mixedPort, dnsPort, socksPo
   runtime["external-controller"] = `127.0.0.1:${controllerPort}`;
   runtime["log-level"] = "info";
   runtime["allow-lan"] = false;
+  const generatedNodeNames = new Set(runtime.proxies.map(({ name }) => name));
   runtime.proxies = [{
     name: "LOCAL-SOCKS-MOCK",
     type: "socks5",
@@ -123,11 +124,11 @@ function makeRuntimeConfig(config, { controllerPort, mixedPort, dnsPort, socksPo
     port: socksPort,
     udp: false,
   }];
-  runtime["proxy-groups"] = [{
-    name: "PROXY",
-    type: "select",
-    proxies: ["LOCAL-SOCKS-MOCK"],
-  }];
+  for (const group of runtime["proxy-groups"]) {
+    group.proxies = [...new Set(group.proxies.map((member) =>
+      generatedNodeNames.has(member) ? "LOCAL-SOCKS-MOCK" : member
+    ))];
+  }
   runtime.hosts = {
     "cn.fixture.test": "198.18.0.2",
     "cn-ip.fixture.test": "198.18.0.2",
@@ -235,24 +236,32 @@ async function runRuntimeCase(name, { baseConfig, ipFixture }) {
       }
     }, `${name}: Mihomo controller did not start`);
 
+    for (const [groupName, expectedSelection] of [["直连", "DIRECT"], ["广告拦截", "REJECT"]]) {
+      const response = await fetch(`http://127.0.0.1:${controllerPort}/proxies/${encodeURIComponent(groupName)}`);
+      assert.equal(response.status, 200, `${groupName} should be visible to Mihomo`);
+      const group = await response.json();
+      assert.equal(group.now, expectedSelection, `${groupName} should keep its built-in default`);
+      report.push(`PASS ${name}: ${groupName} selector defaults to ${expectedSelection}`);
+    }
+
     const cases = [
       {
-        name: "ad REJECT",
+        name: "ad 广告拦截 → REJECT",
         target: `ad.fixture.test:${sinkServer.address().port}`,
-        log: /RuleSet\(ads\).*REJECT/u,
+        log: /RuleSet\(ads\).*广告拦截\[REJECT\]/u,
       },
       {
-        name: "China domain DIRECT",
+        name: "China domain 直连 → DIRECT",
         target: `cn.fixture.test:${sinkServer.address().port}`,
-        log: /RuleSet\(cn\).*DIRECT/u,
+        log: /RuleSet\(cn\).*直连\[DIRECT\]/u,
       },
       {
-        name: "China IP DIRECT for a domain outside the CN-domain set",
+        name: "China IP 直连 → DIRECT for a domain outside the CN-domain set",
         target: `cn-ip.fixture.test:${sinkServer.address().port}`,
-        log: /RuleSet\(cn_ip\).*DIRECT/u,
+        log: /RuleSet\(cn_ip\).*直连\[DIRECT\]/u,
       },
       {
-        name: "LAN DIRECT",
+        name: "LAN fixed DIRECT",
         target: `127.0.0.1:${sinkServer.address().port}`,
         log: /IPCIDR\(127\.0\.0\.0\/8\).*DIRECT/u,
         expectedStatus: 200,
@@ -275,15 +284,46 @@ async function runRuntimeCase(name, { baseConfig, ipFixture }) {
       report.push(`PASS ${name}: ${item.name} matched in Mihomo logs`);
     }
 
+    for (const [groupName, defaultSelection] of [["直连", "DIRECT"], ["广告拦截", "REJECT"]]) {
+      const endpoint = `http://127.0.0.1:${controllerPort}/proxies/${encodeURIComponent(groupName)}`;
+      const selected = await fetch(endpoint, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "PROXY" }),
+      });
+      assert.equal(selected.status, 204, `${groupName} should accept a selection`);
+      assert.equal((await (await fetch(endpoint)).json()).now, "PROXY");
+      if (groupName === "直连") {
+        const logStart = core.output().length;
+        const mockDials = socksServer.seen.length;
+        const lanResult = await proxyRequest(mixedPort, `127.0.0.1:${sinkServer.address().port}`);
+        assert.equal(lanResult.status, 200, "LAN must stay direct after switching the China group");
+        await waitFor(
+          () => /IPCIDR\(127\.0\.0\.0\/8\).*DIRECT/u.test(core.output().slice(logStart)),
+          "LAN did not retain the built-in DIRECT route after switching the China group",
+        );
+        assert.equal(socksServer.seen.length, mockDials, "LAN must not reach the SOCKS mock");
+        report.push(`PASS ${name}: LAN stays DIRECT while 直连 selects PROXY`);
+      }
+      const restored = await fetch(endpoint, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: defaultSelection }),
+      });
+      assert.equal(restored.status, 204);
+      assert.equal((await (await fetch(endpoint)).json()).now, defaultSelection);
+      report.push(`PASS ${name}: ${groupName} switched to PROXY and back to ${defaultSelection}`);
+    }
+
     assert.ok(
-      runtime.rules.includes("RULE-SET,cn_ip,DIRECT"),
+      runtime.rules.includes("RULE-SET,cn_ip,直连"),
       "generated CN-IP policy should be present and retain the no-no-resolve form",
     );
     assert.ok(
-      !runtime.rules.includes("RULE-SET,cn_ip,DIRECT,no-resolve"),
+      !runtime.rules.includes("RULE-SET,cn_ip,直连,no-resolve"),
       "generated CN-IP policy must allow Mihomo to resolve the fixture host",
     );
-    report.push("PASS generated rule retains RULE-SET,cn_ip,DIRECT without no-resolve");
+    report.push("PASS generated rule retains RULE-SET,cn_ip,直连 without no-resolve");
   } finally {
     await core.stop();
   }
@@ -322,15 +362,32 @@ async function main() {
     directChina: true,
     name: "QA route fixture",
   });
-  assert.ok(config.rules.includes("RULE-SET,cn_ip,DIRECT"));
-  assert.ok(!config.rules.includes("RULE-SET,cn_ip,DIRECT,no-resolve"));
+  assert.ok(config.rules.includes("RULE-SET,cn_ip,直连"));
+  assert.ok(!config.rules.includes("RULE-SET,cn_ip,直连,no-resolve"));
 
   const baseDir = path.join(workDir, "base-config");
   await mkdir(baseDir, { recursive: true });
   const basePath = path.join(baseDir, "generated.yaml");
-  await writeFile(basePath, buildConfig(samples.nodes).yaml, { mode: 0o600 });
+  for (const blockAds of [false, true]) {
+    for (const directChina of [false, true]) {
+      await writeFile(basePath, buildConfig(samples.nodes, { blockAds, directChina }).yaml, { mode: 0o600 });
+      await runCore(["-t", "-d", baseDir, "-f", basePath], { cwd: baseDir });
+      report.push(`PASS generated sample YAML accepted by Mihomo -t (blockAds=${blockAds}, directChina=${directChina})`);
+    }
+  }
+
+  const reservedNames = [
+    "GLOBAL", "PROXY", "DIRECT", "REJECT", "REJECT-DROP", "COMPATIBLE", "PASS", "PASS-RULE",
+    "直连", "广告拦截",
+  ];
+  const reserved = parseLinks(reservedNames.map((name, index) =>
+    `trojan://synthetic@node${index}.example.com:443#${encodeURIComponent(name)}`
+  ).join("\n"));
+  assert.deepEqual(reserved.errors, []);
+  assert.ok(reserved.nodes.every(({ name }) => !reservedNames.includes(name)));
+  await writeFile(basePath, buildConfig(reserved.nodes).yaml, { mode: 0o600 });
   await runCore(["-t", "-d", baseDir, "-f", basePath], { cwd: baseDir });
-  report.push("PASS actual generated sample YAML accepted by Mihomo -t");
+  report.push("PASS generated YAML with all reserved-name inputs accepted by Mihomo -t");
 
   await validateInlineFixture("domain-and-lan", {
     baseConfig: config,

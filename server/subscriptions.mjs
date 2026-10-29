@@ -90,6 +90,22 @@ function validName(value) {
     && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
+function subscriptionDisposition(name) {
+  if (typeof name !== "string") return 'inline; filename="subscription.yaml"';
+  const safeName = [...new TextDecoder().decode(encoder.encode(name))
+    .replace(/[\\/<>:"'|?*\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "_")
+    .trim()
+    .replace(/^\.+|\.+$/gu, "")].slice(0, MAX_NAME_LENGTH).join("");
+  if (!safeName) return 'inline; filename="subscription.yaml"';
+  const asciiName = safeName.replace(/[^\x20-\x7e]/gu, "")
+    .replace(/[^A-Za-z0-9 ._-]/gu, "_")
+    .trim()
+    .replace(/^\.+|\.+$/gu, "") || "subscription";
+  const encodedName = encodeURIComponent(safeName)
+    .replace(/['()*]/gu, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `inline; filename="${asciiName}"; filename*=UTF-8''${encodedName}`;
+}
+
 function validYaml(value) {
   return typeof value === "string"
     && value.trim().length > 0
@@ -221,7 +237,7 @@ export function createSubscriptionHandler({ kv, basePath = "/" }) {
       return withNoStore(new Response(record.yaml, {
         headers: {
           "content-type": "application/yaml; charset=utf-8",
-          "content-disposition": 'inline; filename="subscription.yaml"',
+          "content-disposition": subscriptionDisposition(record.name),
         },
       }));
     }

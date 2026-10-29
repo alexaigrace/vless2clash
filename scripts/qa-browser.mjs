@@ -3,6 +3,7 @@ import { mkdir, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { parse as parseYaml } from "yaml";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const baseURL = process.env.QA_BASE_URL || "http://127.0.0.1:5173";
@@ -267,7 +268,19 @@ try {
   await check("YAML tab displays a generated configuration", async () => {
     assert.equal(await page.locator("#yaml-view").isVisible(), true);
     assert.match(await page.locator("#yaml-content").innerText(), /proxies:/u);
-    assert.match(await page.locator("#yaml-content").innerText(), /RULE-SET,ads,REJECT/u);
+    assert.match(await page.locator("#yaml-content").innerText(), /RULE-SET,ads,广告拦截/u);
+  });
+  await check("YAML preview exposes three selectable route groups", async () => {
+    const config = parseYaml(await page.locator("#yaml-content").innerText());
+    assert.deepEqual(config["proxy-groups"].map(({ name, type }) => [name, type]), [
+      ["PROXY", "select"], ["直连", "select"], ["广告拦截", "select"],
+    ]);
+    assert.equal(config["proxy-groups"][1].proxies[0], "DIRECT");
+    assert.equal(config["proxy-groups"][2].proxies[0], "REJECT");
+    assert.ok(config.rules.includes("RULE-SET,private,DIRECT"));
+    assert.ok(config.rules.includes("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve"));
+    assert.ok(config.rules.includes("RULE-SET,cn,直连"));
+    assert.ok(config.rules.includes("MATCH,PROXY"));
   });
   await page.locator("#nodes-tab").click();
   await check("nodes tab returns to the node list", async () => {
@@ -316,6 +329,16 @@ try {
     assert.equal(await page.locator("#publish-button").isDisabled(), true);
     assert.equal(await page.locator("#download-yaml-button").isDisabled(), true);
   });
+  await page.locator("#generate-button").click();
+  await page.locator("#yaml-tab").click();
+  await check("disabled routing switches remove unused groups and keep LAN direct", async () => {
+    const config = parseYaml(await page.locator("#yaml-content").innerText());
+    assert.deepEqual(config["proxy-groups"].map(({ name }) => name), ["PROXY"]);
+    assert.ok(config.rules.includes("RULE-SET,private,DIRECT"));
+    assert.ok(config.rules.includes("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve"));
+    assert.ok(config.rules.every((rule) => !rule.includes("广告拦截") && !rule.includes("直连")));
+  });
+  await page.locator("#nodes-tab").click();
   await page.locator("#block-ads").check();
   await page.locator("#direct-china").check();
   await page.locator("#generate-button").click();

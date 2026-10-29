@@ -1,10 +1,15 @@
 import { stringify } from 'yaml';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_INPUT_CHARS = 500_000;
 const MAX_LINKS = 500;
 const MAX_LINE_CHARS = 8_192;
-const RESERVED_NAMES = new Set(['proxy', 'direct', 'reject']);
+const DIRECT_GROUP = '直连';
+const ADS_GROUP = '广告拦截';
+const RESERVED_NAMES = new Set([
+  'global', 'proxy', 'direct', 'reject', 'reject-drop', 'compatible', 'pass', 'pass-rule',
+  DIRECT_GROUP, ADS_GROUP,
+]);
 
 export const SAMPLE_LINKS = [
   'vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=cdn.example.com&path=%2Fedge#示例-VLESS',
@@ -144,7 +149,7 @@ function parseVless(raw) {
   const allowed = new Set([
     'encryption', 'security', 'type', 'sni', 'servername', 'fp', 'alpn',
     'allowInsecure', 'insecure', 'host', 'path', 'serviceName', 'pbk', 'sid',
-    'flow', 'headerType', 'ed', 'eh',
+    'flow', 'headerType', 'ed', 'eh', 'spx',
   ]);
   const params = parseQuery(url, allowed, { servername: 'sni', insecure: 'allowInsecure' });
   if (params.has('encryption') && params.get('encryption') !== 'none') fail('VLESS 仅支持 encryption=none');
@@ -153,8 +158,8 @@ function parseVless(raw) {
   const network = params.get('type') || 'tcp';
   const security = params.get('security') || 'none';
   if (!['none', 'tls', 'reality'].includes(security)) fail('不支持该 VLESS security 模式');
-  if (security !== 'reality' && (params.has('pbk') || params.has('sid'))) {
-    fail('VLESS pbk 和 sid 仅支持 security=reality');
+  if (security !== 'reality' && (params.has('pbk') || params.has('sid') || params.has('spx'))) {
+    fail('VLESS pbk、sid 和 spx 仅支持 security=reality');
   }
   if (params.has('flow') && security === 'none') fail('VLESS flow 需要 TLS 或 Reality');
   const name = getFragmentName(url);
@@ -173,6 +178,7 @@ function parseVless(raw) {
   }
   if (security === 'reality') {
     if (!params.get('pbk')) fail('Reality 缺少必需的 pbk');
+    // Xray's spx controls fallback crawling; Mihomo reality-opts has no matching field.
     proxy.tls = true;
     proxy['client-fingerprint'] = params.get('fp') || 'chrome';
     proxy['reality-opts'] = { 'public-key': params.get('pbk') };
@@ -504,7 +510,7 @@ export function buildConfig(nodes, { blockAds = true, directChina = true, name =
   const nodeNames = proxies.map((node) => node.name);
   if (new Set(nodeNames.map((value) => value.toLowerCase())).size !== nodeNames.length
     || nodeNames.some((value) => RESERVED_NAMES.has(value.toLowerCase()))) {
-    throw new TypeError('节点名称必须唯一，且不能占用 PROXY、DIRECT 或 REJECT');
+    throw new TypeError('节点名称必须唯一，且不能占用策略组名或 Mihomo 内置名称');
   }
 
   const providers = {
@@ -534,7 +540,7 @@ export function buildConfig(nodes, { blockAds = true, directChina = true, name =
     );
   }
   const rules = [];
-  if (blockAds) rules.push('RULE-SET,ads,REJECT');
+  if (blockAds) rules.push(`RULE-SET,ads,${ADS_GROUP}`);
   rules.push(
     'RULE-SET,private,DIRECT',
     'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
@@ -547,7 +553,7 @@ export function buildConfig(nodes, { blockAds = true, directChina = true, name =
     'IP-CIDR6,fc00::/7,DIRECT,no-resolve',
     'IP-CIDR6,fe80::/10,DIRECT,no-resolve',
   );
-  if (directChina) rules.push('RULE-SET,cn,DIRECT', 'RULE-SET,cn_ip,DIRECT');
+  if (directChina) rules.push(`RULE-SET,cn,${DIRECT_GROUP}`, `RULE-SET,cn_ip,${DIRECT_GROUP}`);
   rules.push('MATCH,PROXY');
 
   const dns = {
@@ -576,8 +582,18 @@ export function buildConfig(nodes, { blockAds = true, directChina = true, name =
       {
         name: 'PROXY',
         type: 'select',
-        proxies: nodeNames,
+        proxies: [...nodeNames, 'DIRECT'],
       },
+      ...(directChina ? [{
+        name: DIRECT_GROUP,
+        type: 'select',
+        proxies: ['DIRECT', 'PROXY', ...nodeNames],
+      }] : []),
+      ...(blockAds ? [{
+        name: ADS_GROUP,
+        type: 'select',
+        proxies: ['REJECT', 'DIRECT', 'PROXY'],
+      }] : []),
     ],
     'rule-providers': providers,
     rules,

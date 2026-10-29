@@ -228,7 +228,10 @@ try {
       assert.equal(response.status, 200);
       assert.match(response.headers.get("content-type") || "", /yaml/u);
       assert.match(response.headers.get("cache-control") || "", /no-store/u);
-      return (await response.text()) === yamlOne;
+      const disposition = response.headers.get("content-disposition") || "";
+      const body = await response.text();
+      return /filename\*=UTF-8''QA%20reserved%20example(?:;|$)/u.test(disposition)
+        && body === yamlOne;
     });
 
     await check("wrong management token rejected", async () => {
@@ -305,7 +308,10 @@ try {
       const response = await api(origin, readRoute);
       if (response.status === 404 || response.status === 503) return false;
       assert.equal(response.status, 200);
-      return (await response.text()) === yamlTwo;
+      const disposition = response.headers.get("content-disposition") || "";
+      const body = await response.text();
+      return /filename\*=UTF-8''QA%20reserved%20updated(?:;|$)/u.test(disposition)
+        && body === yamlTwo;
     });
   }
 } catch (error) {
